@@ -25,10 +25,12 @@ import { CONTENT_PATH, IMG_DIR, OWNER, PANEL_CONFIG_PATH, RAW_BASE, REPO, SITE_U
 import { decryptToken, encryptToken } from "@/lib/crypto";
 import { checkToken, commitFiles, latestDeploy, loadContent, loadPanelConfig, putFile, utf8ToBase64 } from "@/lib/github";
 import { prepareImage } from "@/lib/image";
+import { SOURCE, TARGETS, TranslateError, applyTranslations } from "@/lib/translate";
 import { cn } from "@/lib/utils";
 import { COMPANY_FIELDS, IMAGE_SLOTS, LANGS, SECTIONS } from "@/schema";
 
 const SESSION_KEY = "ecrn.panel.session";
+const AUTO_KEY = "ecrn.panel.autotranslate";
 
 /* ───────── hulpfuncties ───────── */
 
@@ -379,7 +381,7 @@ function ItemsEditor({ field, value = [], onChange, original }) {
 
 /* ───────── tabbladen ───────── */
 
-function TextsTab({ draft, original, setDraft, lang, setLang }) {
+function TextsTab({ draft, original, setDraft, lang, setLang, autoTranslate, setAutoTranslate }) {
   const [sectionId, setSectionId] = useState(SECTIONS[0].id);
   const section = SECTIONS.find((s) => s.id === sectionId);
   const base = `content.${lang}`;
@@ -407,7 +409,15 @@ function TextsTab({ draft, original, setDraft, lang, setLang }) {
           );
         })}
       </div>
-      <p className="mt-2 text-xs text-muted-foreground">Her dil ayrı düzenlenir. Bir dilde yaptığınız değişiklik diğer dillere otomatik geçmez.</p>
+      <label className="mt-3 flex w-fit cursor-pointer items-start gap-2.5 rounded-xl bg-white px-3 py-2.5 text-sm shadow-sm">
+        <input type="checkbox" checked={autoTranslate} onChange={(e) => setAutoTranslate(e.target.checked)} className="mt-0.5 size-4 accent-[var(--navy)]" />
+        <span>
+          <b className="text-navy">Türkçe değişiklikleri NL, FR ve EN'ye otomatik çevir</b>
+          <span className="block text-xs text-muted-foreground">
+            Yayınla'ya basınca çevrilir. Bir dili elle düzelttiyseniz o alanın üzerine yazılmaz.
+          </span>
+        </span>
+      </label>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[15rem_1fr]">
         <nav className="hidden flex-col gap-1 lg:flex">
@@ -588,6 +598,21 @@ function Editor({ token, onLogout }) {
   const [recent, setRecent] = useState({});
   const [tab, setTab] = useState("texts");
   const [lang, setLang] = useState("tr");
+  const [autoTranslate, setAutoTranslateState] = useState(() => {
+    try {
+      return window.localStorage.getItem(AUTO_KEY) !== "0";
+    } catch {
+      return true;
+    }
+  });
+  const setAutoTranslate = (v) => {
+    setAutoTranslateState(v);
+    try {
+      window.localStorage.setItem(AUTO_KEY, v ? "1" : "0");
+    } catch {
+      // negeren
+    }
+  };
   // Opent de taalversie die bewerkt wordt, met een cache-buster (GitHub Pages cachet 10 min).
   const siteLink = () => `${SITE_URL}${lang === "nl" ? "" : `${lang}/`}?v=${Date.now()}`;
   const [error, setError] = useState(null);
@@ -627,26 +652,40 @@ function Editor({ token, onLogout }) {
   }, [changes]);
 
   const doPublish = async () => {
+    let toSave = draft;
+    let note = null;
+    const trChanged = !same(draft.content[SOURCE], original.content[SOURCE]);
+    if (autoTranslate && trChanged) {
+      setPublish({ state: "translating", done: 0, total: 0 });
+      try {
+        const r = await applyTranslations(draft, original, (done, total) => setPublish({ state: "translating", done, total }));
+        toSave = r.draft;
+        setDraft(r.draft);
+        if (r.count) note = `${TARGETS.map((t) => t.toUpperCase()).join(", ")} dillerine çevrildi.`;
+      } catch (e) {
+        note = e instanceof TranslateError ? `Çeviri yapılamadı: ${e.message} Sadece Türkçe yayınlandı.` : "Çeviri yapılamadı; sadece Türkçe yayınlandı.";
+      }
+    }
     setPublish({ state: "saving" });
     try {
       const files = [
-        { path: CONTENT_PATH, base64: utf8ToBase64(JSON.stringify(draft, null, 2) + "\n") },
+        { path: CONTENT_PATH, base64: utf8ToBase64(JSON.stringify(toSave, null, 2) + "\n") },
         ...Object.values(uploads).map((u) => ({ path: `${IMG_DIR}/${u.name}`, base64: u.base64 })),
       ];
       const sha = await commitFiles(token, files, `Panel: içerik güncellendi (${changes} değişiklik)`);
-      setOriginal(structuredClone(draft));
+      setOriginal(structuredClone(toSave));
       setRecent((r) => ({ ...r, ...Object.fromEntries(Object.values(uploads).map((u) => [u.name, u.previewUrl])) }));
       setUploads({});
-      setPublish({ state: "building", sha });
+      setPublish({ state: "building", sha, note });
       for (let i = 0; i < 60; i++) {
         await new Promise((r) => setTimeout(r, 6000));
         const run = await latestDeploy(token);
-        if (!run) return setPublish({ state: "done-unknown" });
+        if (!run) return setPublish({ state: "done-unknown", note });
         if (run.sha === sha && run.status === "completed") {
-          return setPublish(run.conclusion === "success" ? { state: "live" } : { state: "failed", url: run.url });
+          return setPublish(run.conclusion === "success" ? { state: "live", note } : { state: "failed", url: run.url });
         }
       }
-      setPublish({ state: "done-unknown" });
+      setPublish({ state: "done-unknown", note });
     } catch (e) {
       if (e.status === 401 || e.status === 403) setPublish({ state: "error", text: "GitHub anahtarı geçersiz veya süresi dolmuş. Yöneticinize haber verin (ilk kurulum yeniden yapılmalı)." });
       else setPublish({ state: "error", text: "Yayınlanamadı: " + e.message });
@@ -715,7 +754,7 @@ function Editor({ token, onLogout }) {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-6">
-        {tab === "texts" ? <TextsTab draft={draft} original={original} setDraft={setDraft} lang={lang} setLang={setLang} /> : null}
+        {tab === "texts" ? <TextsTab draft={draft} original={original} setDraft={setDraft} lang={lang} setLang={setLang} autoTranslate={autoTranslate} setAutoTranslate={setAutoTranslate} /> : null}
         {tab === "images" ? <ImagesTab draft={draft} original={original} setDraft={setDraft} uploads={uploads} setUploads={setUploads} recent={recent} /> : null}
         {tab === "company" ? <CompanyTab draft={draft} original={original} setDraft={setDraft} /> : null}
       </main>
@@ -724,7 +763,11 @@ function Editor({ token, onLogout }) {
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
           <div className="text-sm">
-            {publish.state === "saving" ? (
+            {publish.state === "translating" ? (
+              <span className="flex items-center gap-2 font-semibold text-navy">
+                <Loader2 className="size-4 animate-spin" /> Diğer dillere çevriliyor… {publish.total ? `${publish.done}/${publish.total}` : ""}
+              </span>
+            ) : publish.state === "saving" ? (
               <span className="flex items-center gap-2 font-semibold text-navy">
                 <Loader2 className="size-4 animate-spin" /> Kaydediliyor…
               </span>
@@ -738,6 +781,7 @@ function Editor({ token, onLogout }) {
                 <button type="button" onClick={() => window.open(siteLink(), "_blank", "noopener,noreferrer")} className="underline">
                   {LANGS.find((l) => l.code === lang).short} sayfasını aç
                 </button>
+                {publish.note ? <span className="font-normal text-foreground/70">· {publish.note}</span> : null}
               </span>
             ) : publish.state === "done-unknown" ? (
               <span className="font-semibold text-emerald-700">Kaydedildi. Site birkaç dakika içinde güncellenir.</span>
@@ -761,7 +805,7 @@ function Editor({ token, onLogout }) {
           <div className="flex gap-2">
             <Button
               variant="outline"
-              disabled={!changes || publish.state === "saving"}
+              disabled={!changes || publish.state === "saving" || publish.state === "translating"}
               onClick={() => {
                 setDraft(structuredClone(original));
                 setUploads({});
@@ -772,7 +816,7 @@ function Editor({ token, onLogout }) {
               <RotateCcw /> Vazgeç
             </Button>
             <Button
-              disabled={!changes || publish.state === "saving"}
+              disabled={!changes || publish.state === "saving" || publish.state === "translating"}
               onClick={doPublish}
               className="h-11 rounded-xl bg-orange px-6 text-base font-bold text-ink hover:bg-[#ffb840]"
             >
