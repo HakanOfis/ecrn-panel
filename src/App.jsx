@@ -196,7 +196,7 @@ function Setup() {
       const check = await checkToken(t);
       if (!check.canPush) throw new Error(`Bu anahtarın ${REPO} deposuna yazma izni yok (Contents: Read and write gerekli).`);
       if (check.otherRepos.length)
-        throw new Error(`Bu anahtar başka depolara da erişebiliyor (${check.otherRepos.join(", ")}). Güvenlik için sadece ${REPO} seçilmeli.`);
+        throw new Error(`Bu anahtar başka gizli depolara da erişebiliyor (${check.otherRepos.join(", ")}). Güvenlik için “Only select repositories” ile sadece ${REPO} seçilmeli.`);
       setMsg({ tone: "info", text: "Anahtar şifreleniyor… (birkaç saniye)" });
       const config = await encryptToken(t, user, pass);
       await putFile(t, PANEL_CONFIG_PATH, utf8ToBase64(JSON.stringify(config, null, 2) + "\n"), "Panel: şifreli anahtar kaydedildi");

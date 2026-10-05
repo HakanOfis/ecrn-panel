@@ -68,7 +68,11 @@ export async function checkToken(token) {
   const repos = await call(token, `/user/repos?per_page=100`).catch(() => null);
   return {
     canPush: Boolean(repo.permissions?.push),
-    otherRepos: Array.isArray(repos) ? repos.filter((r) => r.full_name.toLowerCase() !== `${OWNER}/${REPO}`.toLowerCase()).map((r) => r.full_name) : [],
+    // Fine-grained sleutels kunnen ALLE publieke repo's lezen (niet schrijven); die tellen dus niet mee.
+    // Zichtbare privé-repo's betekenen wél dat de sleutel te ruim is ingesteld.
+    otherRepos: Array.isArray(repos)
+      ? repos.filter((r) => r.private && r.full_name.toLowerCase() !== `${OWNER}/${REPO}`.toLowerCase()).map((r) => r.full_name)
+      : [],
   };
 }
 
