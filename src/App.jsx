@@ -379,8 +379,7 @@ function ItemsEditor({ field, value = [], onChange, original }) {
 
 /* ───────── tabbladen ───────── */
 
-function TextsTab({ draft, original, setDraft }) {
-  const [lang, setLang] = useState("tr");
+function TextsTab({ draft, original, setDraft, lang, setLang }) {
   const [sectionId, setSectionId] = useState(SECTIONS[0].id);
   const section = SECTIONS.find((s) => s.id === sectionId);
   const base = `content.${lang}`;
@@ -588,6 +587,9 @@ function Editor({ token, onLogout }) {
   // Net gepubliceerde foto's: lokale voorvertoning tonen tot GitHub ze levert.
   const [recent, setRecent] = useState({});
   const [tab, setTab] = useState("texts");
+  const [lang, setLang] = useState("tr");
+  // Opent de taalversie die bewerkt wordt, met een cache-buster (GitHub Pages cachet 10 min).
+  const siteLink = () => `${SITE_URL}${lang === "nl" ? "" : `${lang}/`}?v=${Date.now()}`;
   const [error, setError] = useState(null);
   const [publish, setPublish] = useState({ state: "idle" });
 
@@ -683,9 +685,13 @@ function Editor({ token, onLogout }) {
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <a href={SITE_URL} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-white/20 px-3 text-sm font-semibold hover:bg-white/10">
-              <ExternalLink className="size-4" /> Siteyi aç
-            </a>
+            <button
+              type="button"
+              onClick={() => window.open(siteLink(), "_blank", "noopener,noreferrer")}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-white/20 px-3 text-sm font-semibold hover:bg-white/10"
+            >
+              <ExternalLink className="size-4" /> Siteyi aç ({LANGS.find((l) => l.code === lang).short})
+            </button>
             <button type="button" onClick={onLogout} className="inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-semibold text-white/75 hover:bg-white/10">
               <LogOut className="size-4" /> Çıkış
             </button>
@@ -709,7 +715,7 @@ function Editor({ token, onLogout }) {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-6">
-        {tab === "texts" ? <TextsTab draft={draft} original={original} setDraft={setDraft} /> : null}
+        {tab === "texts" ? <TextsTab draft={draft} original={original} setDraft={setDraft} lang={lang} setLang={setLang} /> : null}
         {tab === "images" ? <ImagesTab draft={draft} original={original} setDraft={setDraft} uploads={uploads} setUploads={setUploads} recent={recent} /> : null}
         {tab === "company" ? <CompanyTab draft={draft} original={original} setDraft={setDraft} /> : null}
       </main>
@@ -728,7 +734,10 @@ function Editor({ token, onLogout }) {
               </span>
             ) : publish.state === "live" ? (
               <span className="flex items-center gap-2 font-semibold text-emerald-700">
-                <Check className="size-4" /> Yayında! Siteyi yenileyince değişiklikleri görürsünüz.
+                <Check className="size-4" /> Yayında!
+                <button type="button" onClick={() => window.open(siteLink(), "_blank", "noopener,noreferrer")} className="underline">
+                  {LANGS.find((l) => l.code === lang).short} sayfasını aç
+                </button>
               </span>
             ) : publish.state === "done-unknown" ? (
               <span className="font-semibold text-emerald-700">Kaydedildi. Site birkaç dakika içinde güncellenir.</span>
